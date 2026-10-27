@@ -1,0 +1,70 @@
+import EmbeddedPostgres from 'embedded-postgres';
+import {spawn} from 'node:child_process';
+import {randomBytes} from 'node:crypto';
+import path from 'node:path';
+import {pathToFileURL,fileURLToPath} from 'node:url';
+import {tmpdir} from 'node:os';
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const project=fileURLToPath(new URL('../../',import.meta.url));
+const databaseDir=path.join(tmpdir(),'blackmamer-integration-'+Date.now());
+if(!databaseDir.startsWith(path.join(tmpdir(),'blackmamer-integration-')))throw new Error('Invalid test database path');
+const password=randomBytes(24).toString('hex');
+const origin='http://127.0.0.1:3002';
+const env={...process.env,DATABASE_URL:`postgresql://postgres:${password}@127.0.0.1:55439/studio_test`,DIRECT_URL:`postgresql://postgres:${password}@127.0.0.1:55439/studio_test`,NEXTAUTH_URL:origin,NEXTAUTH_SECRET:randomBytes(32).toString('hex'),OWNER_EMAIL:'owner@example.test',OWNER_PASSWORD:randomBytes(24).toString('hex'),SEED_DEMO:'false',RESEND_API_KEY:'',MIDTRANS_SERVER_KEY:''};
+const pg=new EmbeddedPostgres({databaseDir,user:'postgres',password,port:55439,persistent:true,authMethod:'scram-sha-256',postgresFlags:['-h','127.0.0.1'],onLog:()=>{},onError:()=>{}});
+let server;let db;let count=0;
+function run(args){return new Promise((resolve,reject)=>{const child=spawn(process.execPath,args,{cwd:project,env,windowsHide:true,stdio:['ignore','pipe','pipe']});let output='';child.stdout.on('data',d=>output+=d);child.stderr.on('data',d=>output+=d);child.on('close',code=>code===0?resolve(output):reject(new Error('Command failed: '+args[0]+'\n'+output.replaceAll(password,'[redacted]').replaceAll(env.OWNER_PASSWORD,'[redacted]'))));});}
+async function request(route,{method='GET',body,cookie}={}){const r=await fetch(origin+route,{method,redirect:'manual',headers:{Origin:origin,...(body?{'Content-Type':'application/json'}:{}),...(cookie?{Cookie:cookie}:{})},body:body?JSON.stringify(body):undefined});let data;try{data=await r.json();}catch{data=null;}return {status:r.status,data,response:r};}
+async function login(email,pass){const csrf=await fetch(origin+'/api/auth/csrf');const token=await csrf.json();const cookie=csrf.headers.getSetCookie().map(c=>c.split(';')[0]).join('; ');const result=await fetch(origin+'/api/auth/callback/credentials',{method:'POST',redirect:'manual',headers:{Origin:origin,Cookie:cookie,'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({email,password:pass,csrfToken:token.csrfToken,callbackUrl:origin+'/account',json:'true'})});const all=[...csrf.headers.getSetCookie(),...result.headers.getSetCookie()].map(c=>c.split(';')[0]).join('; ');assert.ok(all.includes('next-auth.session-token'),'Session cookie expected');count++;return all;}
+try{
+await pg.initialise();await pg.start();await pg.createDatabase('studio_test');console.log('Temporary PostgreSQL started on loopback.');
+await run(['node_modules/prisma/build/index.js','migrate','deploy']);count++;
+await run(['node_modules/prisma/build/index.js','migrate','deploy']);count++;
+await run(['--import','tsx','prisma/seed.ts']);count++;
+await run(['--import','tsx','prisma/seed.ts']);count++;
+const {PrismaClient}=await import(pathToFileURL(path.join(project,'node_modules/@prisma/client/default.js')).href);
+const {hash}=await import(pathToFileURL(path.join(project,'node_modules/bcryptjs/index.js')).href);
+db=new PrismaClient({datasourceUrl:env.DATABASE_URL});
+const customerPassword=randomBytes(20).toString('hex');
+const customer=await db.user.create({data:{name:'QA Customer',email:'customer@example.test',password:await hash(customerPassword,12),emailVerified:new Date()}});
+const other=await db.user.create({data:{name:'QA Other',email:'other@example.test',password:await hash(customerPassword,12),emailVerified:new Date()}});
+server=spawn(process.execPath,['node_modules/next/dist/bin/next','start','--hostname','127.0.0.1','--port','3002'],{cwd:project,env,windowsHide:true,stdio:['ignore','pipe','pipe']});
+let serverLog='';server.stdout.on('data',d=>serverLog+=d);server.stderr.on('data',d=>serverLog+=d);
+for(let attempt=0;attempt<60;attempt++){try{const r=await fetch(origin+'/api/auth/csrf');if(r.ok)break;}catch{}await new Promise(r=>setTimeout(r,500));}
+const ownerCookie=await login(env.OWNER_EMAIL,env.OWNER_PASSWORD);
+const customerCookie=await login(customer.email,customerPassword);
+const otherCookie=await login(other.email,customerPassword);
+assert.equal((await request('/api/admin/media')).status,401);count++;
+assert.equal((await request('/api/admin/media',{cookie:customerCookie})).status,403);count++;
+const draft={title:'QA Project',slug:'qa-project',description:'Real database test project.',category:'QA',cover:'/concept-form.svg',status:'DRAFT'};
+let created=await request('/api/admin/portfolio',{method:'POST',cookie:ownerCookie,body:{data:draft}});assert.equal(created.status,200,JSON.stringify(created.data));const projectId=created.data.result.id;count++;
+assert.equal((await fetch(origin+'/portfolio/qa-project')).status,404);count++;
+assert.equal((await request('/api/admin/portfolio',{method:'POST',cookie:ownerCookie,body:{id:projectId,data:{...draft,status:'PUBLISHED'}}})).status,200);count++;
+assert.equal((await fetch(origin+'/portfolio/qa-project')).status,200);count++;
+const privateFile=await db.media.create({data:{name:'fixture.zip',key:'paid/test/fixture.zip',provider:'s3',private:true,contentType:'application/zip',size:4}});
+const product={title:'QA Free Product',slug:'qa-free-product',sku:'QA-FREE',description:'Integration test fixture.',category:'QA',cover:'/concept-form.svg',status:'PUBLISHED',prices:[{license:'Personal',terms:'QA personal license, no redistribution.',amount:0}],fileIds:[privateFile.id]};
+const saved=await request('/api/admin/products',{method:'POST',cookie:ownerCookie,body:{data:product}});assert.equal(saved.status,200,JSON.stringify(saved.data));const productId=saved.data.result.id;count++;
+const cart={items:[{productId,license:'Personal',amount:-999}]};
+const checked=await request('/api/commerce/checkout',{method:'POST',cookie:customerCookie,body:cart});assert.equal(checked.status,200,JSON.stringify(checked.data));assert.equal(checked.data.free,true);count++;
+const order=await db.order.findUnique({where:{id:checked.data.orderId},include:{items:true}});assert.equal(order.total,0);assert.equal(order.status,'PAID');count++;
+assert.equal(await db.entitlement.count({where:{userId:customer.id,productId}}),1);count++;
+const file=await db.productFile.findFirstOrThrow({where:{productId}});
+assert.equal((await request('/api/download/'+file.id,{cookie:otherCookie})).status,403);count++;
+assert.equal((await request('/api/download/'+file.id)).status,401);count++;
+assert.equal((await request('/api/account/review',{method:'POST',cookie:otherCookie,body:{productId,rating:5,text:'This is not a legitimate purchase.'}})).status,403);count++;
+assert.equal((await request('/api/account/review',{method:'POST',cookie:customerCookie,body:{productId,rating:5,text:'A legitimate integration test review.'}})).status,200);count++;
+assert.equal((await db.review.findFirstOrThrow({where:{productId,userId:customer.id}})).approved,false);count++;
+const contact={name:'QA Visitor',email:'visitor@example.test',subject:'QA inquiry',message:'A sufficiently detailed test inquiry without any real recipient.',website:''};assert.equal((await request('/api/contact',{method:'POST',body:contact})).status,200);assert.equal(await db.inquiry.count(),1);count++;
+await request('/api/admin/products',{method:'POST',cookie:ownerCookie,body:{id:productId,data:{...product,prices:[{license:'Personal',terms:'QA revised personal license.',amount:50000}]}}});
+assert.equal((await request('/api/commerce/checkout',{method:'POST',cookie:customerCookie,body:cart})).status,503);count++;
+assert.equal((await db.orderItem.findFirstOrThrow({where:{orderId:order.id}})).amount,0);count++;
+await db.entitlement.updateMany({where:{userId:customer.id,productId},data:{revoked:true}});
+assert.equal((await request('/api/download/'+file.id,{cookie:customerCookie})).status,403);count++;
+const nextPass=randomBytes(20).toString('hex');assert.equal((await request('/api/account/profile',{method:'POST',cookie:customerCookie,body:{name:'QA Customer',currentPassword:customerPassword,newPassword:nextPass}})).status,200);count++;
+assert.equal((await request('/api/account/wishlist',{method:'POST',cookie:customerCookie,body:{productId}})).status,401);count++;
+assert.equal((await request('/api/admin/portfolio',{method:'POST',cookie:ownerCookie,body:{id:projectId,action:'delete'}})).status,200);count++;
+assert.equal((await fetch(origin+'/portfolio/qa-project')).status,404);count++;
+const report={passed:count,services:'Temporary local PostgreSQL + production Next.js server',notTested:['Midtrans Sandbox settlement/refund','Real object storage upload/download bytes','Resend delivery'],timestamp:new Date().toISOString()};
+fs.writeFileSync(fileURLToPath(new URL('report.json',import.meta.url)),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+}finally{if(db)await db.$disconnect();if(server)server.kill();await pg.stop();}

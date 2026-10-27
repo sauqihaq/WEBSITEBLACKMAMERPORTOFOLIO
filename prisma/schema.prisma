@@ -1,0 +1,271 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+enum Role {
+  CUSTOMER
+  ADMIN
+  OWNER
+}
+enum Status {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+enum OrderStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+  REFUNDED
+}
+model User {
+  id String @id @default(cuid())
+  name String
+  email String @unique
+  password String
+  role Role @default(CUSTOMER)
+  emailVerified DateTime?
+  sessionVersion Int @default(0)
+  deletionRequested Boolean @default(false)
+  createdAt DateTime @default(now())
+  orders Order[]
+  entitlements Entitlement[]
+  reviews Review[]
+  wishlist Wishlist[]
+  cart Json?
+}
+model Token {
+  hash String @id
+  email String
+  type String
+  expiresAt DateTime
+  @@index([email, type])
+}
+model Category {
+  id String @id @default(cuid())
+  name String
+  slug String @unique
+  kind String
+  @@unique([name,kind])
+}
+model Project {
+  id String @id @default(cuid())
+  title String
+  slug String @unique
+  description String
+  category String
+  tags String[] @default([])
+  cover String
+  media Json @default("[]")
+  modelUrl String?
+  details Json @default("{}")
+  featured Boolean @default(false)
+  sortOrder Int @default(0)
+  status Status @default(DRAFT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([status,featured,sortOrder])
+}
+model Product {
+  id String @id @default(cuid())
+  title String
+  slug String @unique
+  sku String @unique
+  description String
+  category String
+  tags String[] @default([])
+  cover String
+  media Json @default("[]")
+  modelUrl String?
+  specifications Json @default("{}")
+  featured Boolean @default(false)
+  status Status @default(DRAFT)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  prices ProductPrice[]
+  files ProductFile[]
+  reviews Review[]
+  wishlist Wishlist[]
+  @@index([status,featured])
+}
+model ProductPrice {
+  id String @id @default(cuid())
+  productId String
+  product Product @relation(fields:[productId],references:[id],onDelete:Cascade)
+  license String
+  terms String
+  amount Int
+  @@unique([productId,license])
+}
+model ProductFile {
+  id String @id @default(cuid())
+  productId String
+  product Product @relation(fields:[productId],references:[id],onDelete:Cascade)
+  mediaId String
+  media Media @relation(fields:[mediaId],references:[id])
+  version String @default("1.0")
+  @@unique([productId,mediaId])
+}
+model Media {
+  id String @id @default(cuid())
+  name String
+  key String @unique
+  url String?
+  provider String
+  private Boolean
+  contentType String
+  size Int
+  folder String @default("")
+  tags String[] @default([])
+  createdAt DateTime @default(now())
+  files ProductFile[]
+}
+model Order {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  status OrderStatus @default(PENDING)
+  total Int
+  discount Int @default(0)
+  couponCode String?
+  snapToken String?
+  paymentUrl String?
+  gatewayId String?
+  createdAt DateTime @default(now())
+  paidAt DateTime?
+  items OrderItem[]
+  payments Payment[]
+  @@index([userId,createdAt])
+  @@index([status,createdAt])
+}
+model OrderItem {
+  id String @id @default(cuid())
+  orderId String
+  order Order @relation(fields:[orderId],references:[id])
+  productId String
+  title String
+  license String
+  terms String
+  amount Int
+  entitlement Entitlement?
+}
+model Payment {
+  id String @id @default(cuid())
+  orderId String
+  order Order @relation(fields:[orderId],references:[id])
+  gatewayId String
+  status String
+  method String?
+  createdAt DateTime @default(now())
+  @@unique([gatewayId,status])
+}
+model Entitlement {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  orderItemId String @unique
+  orderItem OrderItem @relation(fields:[orderItemId],references:[id])
+  productId String
+  revoked Boolean @default(false)
+  downloadLimit Int?
+  downloads Int @default(0)
+  logs DownloadLog[]
+  @@index([userId,productId])
+}
+model DownloadLog {
+  id String @id @default(cuid())
+  entitlementId String
+  entitlement Entitlement @relation(fields:[entitlementId],references:[id])
+  fileId String
+  createdAt DateTime @default(now())
+}
+model Coupon {
+  id String @id @default(cuid())
+  code String @unique
+  type String @default("PERCENT")
+  value Int
+  minimum Int @default(0)
+  maxUses Int?
+  uses Int @default(0)
+  expiresAt DateTime?
+  active Boolean @default(true)
+  productIds String[] @default([])
+}
+model Review {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  productId String
+  product Product @relation(fields:[productId],references:[id])
+  rating Int
+  text String
+  approved Boolean @default(false)
+  createdAt DateTime @default(now())
+  @@unique([userId,productId])
+}
+model Wishlist {
+  userId String
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  productId String
+  product Product @relation(fields:[productId],references:[id],onDelete:Cascade)
+  @@id([userId,productId])
+}
+model Inquiry {
+  id String @id @default(cuid())
+  name String
+  email String
+  subject String
+  message String
+  kind String @default("CONTACT")
+  details Json @default("{}")
+  status String @default("NEW")
+  notes String @default("")
+  createdAt DateTime @default(now())
+  @@index([kind,status,createdAt])
+}
+model Content {
+  id String @id @default(cuid())
+  kind String
+  title String
+  slug String @unique
+  description String
+  cover String @default("")
+  details Json @default("{}")
+  status Status @default(DRAFT)
+  sortOrder Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([kind,status])
+}
+model Setting {
+  key String @id
+  value Json
+}
+model AuditLog {
+  id String @id @default(cuid())
+  actorId String
+  action String
+  target String
+  createdAt DateTime @default(now())
+  @@index([createdAt])
+}
+model RateLimit {
+  key String @id
+  hits Int @default(1)
+  expiresAt DateTime
+}
+model EmailJob {
+  id String @id @default(cuid())
+  key String @unique
+  to String
+  subject String
+  text String
+  sentAt DateTime?
+  attempts Int @default(0)
+  createdAt DateTime @default(now())
+}
