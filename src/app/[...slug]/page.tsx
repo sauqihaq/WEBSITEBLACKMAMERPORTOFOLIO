@@ -2,7 +2,8 @@ import { ContactLinks } from "@/components/contact-links";
 import Link from "next/link";
 import { money } from "@/lib/format";
 import { RichText } from "@/components/rich-text";
-import { CoverMedia } from "@/components/cover-media";
+import { CoverMedia, isVideoUrl } from "@/components/cover-media";
+import { MediaSlider } from "@/components/media-slider";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { Suspense } from "react";
@@ -77,14 +78,67 @@ export default async function Page({ params, searchParams }: Props) {
   const section = slug[0];
   const sub = slug[1];
   const site = await settings();
-  if(section==='search'){
-    const needle=(query.q||'').trim().toLowerCase();
-    const [work,assets,posts]=await Promise.all([projects(),products(),contents('blog')]);
-    const matches=(entry:{title:string;description:string})=>(entry.title+' '+entry.description).toLowerCase().includes(needle);
-    const foundWork=needle?work.filter(matches):[];
-    const foundAssets=needle?assets.filter(matches):[];
-    const foundPosts=needle?posts.filter(matches):[];
-    return <div className="page"><Heading tag="GLOBAL SEARCH" title="FIND YOUR NEXT IDEA" text={needle?'Hasil pencarian untuk “'+query.q+'”':'Masukkan judul karya, produk, atau topik journal.'}/><form className="filter-toolbar" action="/search"><input name="q" defaultValue={query.q||''} aria-label="Search all content" placeholder="Search the studio…"/><button className="button">SEARCH ↗</button></form><SectionHead number="01" title="PORTFOLIO"/><div className="work-grid">{foundWork.map((w,i)=><WorkCard key={w.id} work={w} index={i}/>)}</div>{!foundWork.length&&<p className="empty-state">Tidak ada karya yang cocok.</p>}<SectionHead number="02" title="ASSETS"/><div className="work-grid">{foundAssets.map((w,i)=><WorkCard key={w.id} work={w} index={i} shop/>)}</div>{!foundAssets.length&&<p className="empty-state">Tidak ada aset yang cocok.</p>}<SectionHead number="03" title="JOURNAL"/>{foundPosts.map(p=><Link key={p.id} href={'/blog/'+p.slug} className="panel"><h3>{p.title}</h3></Link>)}{!foundPosts.length&&<p className="empty-state">Tidak ada artikel yang cocok.</p>}</div>;
+  if (section === "search") {
+    const needle = (query.q || "").trim().toLowerCase();
+    const [work, assets, posts] = await Promise.all([
+      projects(),
+      products(),
+      contents("blog"),
+    ]);
+    const matches = (entry: { title: string; description: string }) =>
+      (entry.title + " " + entry.description).toLowerCase().includes(needle);
+    const foundWork = needle ? work.filter(matches) : [];
+    const foundAssets = needle ? assets.filter(matches) : [];
+    const foundPosts = needle ? posts.filter(matches) : [];
+    return (
+      <div className="page">
+        <Heading
+          tag="GLOBAL SEARCH"
+          title="FIND YOUR NEXT IDEA"
+          text={
+            needle
+              ? "Hasil pencarian untuk “" + query.q + "”"
+              : "Masukkan judul karya, produk, atau topik journal."
+          }
+        />
+        <form className="filter-toolbar" action="/search">
+          <input
+            name="q"
+            defaultValue={query.q || ""}
+            aria-label="Search all content"
+            placeholder="Search the studio…"
+          />
+          <button className="button">SEARCH ↗</button>
+        </form>
+        <SectionHead number="01" title="PORTFOLIO" />
+        <div className="work-grid">
+          {foundWork.map((w, i) => (
+            <WorkCard key={w.id} work={w} index={i} />
+          ))}
+        </div>
+        {!foundWork.length && (
+          <p className="empty-state">Tidak ada karya yang cocok.</p>
+        )}
+        <SectionHead number="02" title="ASSETS" />
+        <div className="work-grid">
+          {foundAssets.map((w, i) => (
+            <WorkCard key={w.id} work={w} index={i} shop />
+          ))}
+        </div>
+        {!foundAssets.length && (
+          <p className="empty-state">Tidak ada aset yang cocok.</p>
+        )}
+        <SectionHead number="03" title="JOURNAL" />
+        {foundPosts.map((p) => (
+          <Link key={p.id} href={"/blog/" + p.slug} className="panel">
+            <h3>{p.title}</h3>
+          </Link>
+        ))}
+        {!foundPosts.length && (
+          <p className="empty-state">Tidak ada artikel yang cocok.</p>
+        )}
+      </div>
+    );
   }
   if (
     [
@@ -141,6 +195,17 @@ export default async function Page({ params, searchParams }: Props) {
       type: string;
       caption?: string;
     }[];
+    const slides = [
+      ...(item.cover
+        ? [
+            {
+              url: item.cover,
+              type: isVideoUrl(item.cover) ? "video" : "image",
+            },
+          ]
+        : []),
+      ...gallery.filter((m) => m.url !== item.cover),
+    ];
     const specs = (
       "specifications" in item
         ? item.specifications
@@ -154,19 +219,25 @@ export default async function Page({ params, searchParams }: Props) {
           ← BACK TO {shop ? "SHOP" : "PORTFOLIO"}
         </Link>
         <Heading tag={item.category} title={item.title} />
-        <CoverMedia
-          className="detail-hero"
-          src={item.cover}
-          alt={item.title}
-          lazy={false}
-        />
+        <MediaSlider slides={slides} title={item.title} />
         <div className="detail-main">
           <div>
             <h2>
               THE OVERVIEW<span className="red">.</span>
             </h2>
             <RichText text={item.description} />
-            {shop&&<div className="detail-meta" style={{margin:'30px 0'}}>{Object.entries(specs).filter(([key])=>key!=='sample').map(([key,value])=><div key={key}><small>{key}</small><span>{String(value)}</span></div>)}</div>}
+            {shop && (
+              <div className="detail-meta" style={{ margin: "30px 0" }}>
+                {Object.entries(specs)
+                  .filter(([key]) => key !== "sample")
+                  .map(([key, value]) => (
+                    <div key={key}>
+                      <small>{key}</small>
+                      <span>{String(value)}</span>
+                    </div>
+                  ))}
+              </div>
+            )}
             <div className="skill-list" style={{ margin: "25px 0" }}>
               {item.tags.map((tag) => (
                 <span key={tag}>{tag}</span>
@@ -175,22 +246,6 @@ export default async function Page({ params, searchParams }: Props) {
             {item.modelUrl && (
               <Viewer url={item.modelUrl} poster={item.cover} />
             )}
-            <div className="gallery">
-              {gallery.map((m, i) => (
-                <figure key={i}>
-                  {m.type === "video" ? (
-                    <video controls preload="metadata" src={m.url} />
-                  ) : (
-                    <img
-                      loading="lazy"
-                      src={m.url}
-                      alt={m.caption || item.title + " " + (i + 1)}
-                    />
-                  )}
-                  <figcaption>{m.caption}</figcaption>
-                </figure>
-              ))}
-            </div>
             {shop && (
               <>
                 <h2>REVIEWS</h2>
