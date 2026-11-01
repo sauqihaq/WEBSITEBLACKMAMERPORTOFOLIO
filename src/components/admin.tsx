@@ -1,6 +1,8 @@
 "use client";
 import Link from "next/link";
 import { MediaPicker } from "./media-picker";
+import { MediaUploader, type MediaItem } from "./media-uploader";
+import { isVideoUrl } from "./cover-media";
 import { usePathname, useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import {
@@ -224,7 +226,6 @@ const ADVANCED_KEYS = [
   "slug",
   "sku",
   "tags",
-  "media",
   "modelUrl",
   "featured",
   "sortOrder",
@@ -771,6 +772,32 @@ export function Editor({
                   />
                 </div>
               );
+            if (simple && key === "media") return null;
+            if (simple && key === "cover" && Array.isArray(data.media)) {
+              const list = data.media as MediaItem[];
+              const first = String(v || "");
+              const items: MediaItem[] =
+                first && !list.some((m) => m.url === first)
+                  ? [
+                      {
+                        url: first,
+                        type: isVideoUrl(first) ? "video" : "image",
+                      },
+                      ...list,
+                    ]
+                  : list;
+              return (
+                <div key={key} className="full">
+                  <MediaUploader
+                    items={items}
+                    onChange={(next) => {
+                      set("media", next);
+                      set("cover", next[0]?.url || "");
+                    }}
+                  />
+                </div>
+              );
+            }
             if (simple && key === "cover")
               return (
                 <div key={key} className="full">
