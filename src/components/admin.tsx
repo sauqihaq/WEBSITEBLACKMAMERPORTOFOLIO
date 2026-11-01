@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { MediaPicker } from "./media-picker";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   LayoutDashboard,
   Box,
@@ -219,6 +219,31 @@ const selectOptions: Record<string, string[]> = {
   heroMode: ["image", "video", "model", "gradient"],
   theme: ["dark", "light"],
 };
+const SIMPLE_MODULES = ["portfolio", "products", "services", "blog", "pages"];
+const ADVANCED_KEYS = [
+  "slug",
+  "sku",
+  "tags",
+  "media",
+  "modelUrl",
+  "featured",
+  "sortOrder",
+  "details",
+  "specifications",
+];
+const slugify = (t: string) =>
+  t
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+const rand = (n: number) =>
+  Math.random()
+    .toString(36)
+    .slice(2, 2 + n)
+    .toUpperCase();
 export function AdminTable({ module, rows }: { module: string; rows: Row[] }) {
   const [query, setQuery] = useState("");
   const [editor, setEditor] = useState<Row | null>(null);
@@ -322,6 +347,9 @@ export function AdminTable({ module, rows }: { module: string; rows: Row[] }) {
           module={module}
           value={editor}
           id={editingId}
+          categories={Array.from(
+            new Set(rows.map((r) => String(r.category || "")).filter(Boolean)),
+          )}
           onClose={() => setEditor(null)}
         />
       )}
@@ -457,19 +485,34 @@ export function Editor({
   module,
   value,
   id,
+  categories = [],
   onClose,
 }: {
   module: string;
   value: Row;
   id?: string;
+  categories?: string[];
   onClose?: () => void;
 }) {
-  const [data, setData] = useState<Row>(value);
+  const simple = SIMPLE_MODULES.includes(module);
+  const slugTouched = useRef(!!id);
+  const [data, setData] = useState<Row>(() =>
+    module === "products" && !value.sku
+      ? { ...value, sku: "BM-" + rand(6) }
+      : value,
+  );
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const router = useRouter();
-  const set = (key: string, v: unknown) =>
-    setData((prev) => ({ ...prev, [key]: v }));
+  const set = (key: string, v: unknown) => {
+    if (key === "slug") slugTouched.current = true;
+    setData((prev) => {
+      const next: Row = { ...prev, [key]: v };
+      if (simple && key === "title" && !slugTouched.current)
+        next.slug = slugify(String(v));
+      return next;
+    });
+  };
   return (
     <form
       className="admin-editor"
@@ -478,7 +521,12 @@ export function Editor({
         setBusy(true);
         setNotice("");
         try {
-          await api("/api/admin/" + module, { id, data });
+          const payload: Row = { ...data };
+          if (simple && !payload.slug)
+            payload.slug =
+              slugify(String(payload.title || "")) ||
+              "item-" + rand(5).toLowerCase();
+          await api("/api/admin/" + module, { id, data: payload });
           setNotice("Perubahan berhasil disimpan.");
           router.refresh();
           onClose?.();
@@ -497,359 +545,419 @@ export function Editor({
             : "Create something new"}
       </h2>
       <div className="form-grid">
-        {Object.entries(data).map(([key, v]) => {
-          if (key === "prices")
-            return (
-              <div className="full" key={key}>
-                <label>Lisensi dan harga server (IDR)</label>
-                {(v as Row[]).map((p, i) => (
-                  <div
-                    className="form-grid panel"
-                    key={i}
-                    style={{ marginTop: 10 }}
-                  >
-                    <label>
-                      Lisensi
-                      <input
-                        required
-                        value={String(p.license)}
-                        onChange={(e) =>
-                          set(
-                            "prices",
-                            (v as Row[]).map((a, n) =>
-                              n === i ? { ...a, license: e.target.value } : a,
-                            ),
-                          )
-                        }
-                      />
-                    </label>
-                    <label>
-                      Harga
-                      <input
-                        required
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={Number(p.amount)}
-                        onChange={(e) =>
-                          set(
-                            "prices",
-                            (v as Row[]).map((a, n) =>
-                              n === i
-                                ? { ...a, amount: Number(e.target.value) }
-                                : a,
-                            ),
-                          )
-                        }
-                      />
-                    </label>
-                    <label className="full">
-                      Ketentuan lisensi
-                      <textarea
-                        required
-                        minLength={10}
-                        value={String(p.terms)}
-                        onChange={(e) =>
-                          set(
-                            "prices",
-                            (v as Row[]).map((a, n) =>
-                              n === i ? { ...a, terms: e.target.value } : a,
-                            ),
-                          )
-                        }
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        set(
-                          "prices",
-                          (v as Row[]).filter((_, n) => n !== i),
-                        )
-                      }
+        {(() => {
+          const renderField = ([key, v]: [string, unknown]) => {
+            if (key === "prices")
+              return (
+                <div className="full" key={key}>
+                  <label>Lisensi dan harga server (IDR)</label>
+                  {(v as Row[]).map((p, i) => (
+                    <div
+                      className="form-grid panel"
+                      key={i}
+                      style={{ marginTop: 10 }}
                     >
-                      Remove license
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  className="button outline"
-                  onClick={() =>
-                    set("prices", [
-                      ...(v as Row[]),
-                      { license: "Commercial", amount: 0, terms: "" },
-                    ])
-                  }
-                >
-                  + Add license
-                </button>
-              </div>
-            );
-          if (["media", "socials"].includes(key))
-            return (
-              <label key={key} className="full">
-                {key === "media"
-                  ? "Gallery — satu URL per baris, video .mp4/.webm dikenali otomatis"
-                  : "Social links — Label | https://alamat"}
-                <textarea
-                  defaultValue={(v as Row[])
-                    .map((m) =>
-                      key === "media" ? m.url : m.label + " | " + m.url,
-                    )
-                    .join("\n")}
-                  onChange={(e) =>
-                    set(
-                      key,
-                      e.target.value
-                        .split("\n")
-                        .filter(Boolean)
-                        .map((line) =>
-                          key === "media"
-                            ? {
-                                url: line.trim(),
-                                type: /\.(mp4|webm)(\?|$)/i.test(line)
-                                  ? "video"
-                                  : "image",
-                              }
-                            : {
-                                label: line.split("|")[0].trim(),
-                                url: line.split("|")[1]?.trim() || "",
-                              },
-                        ),
-                    )
-                  }
-                />
-              </label>
-            );
-          if (key === "sections")
-            return (
-              <div className="full" key={key}>
-                <label>
-                  Homepage sections — urutkan dengan panah, hapus untuk
-                  menyembunyikan
-                </label>
-                {(v as string[]).map((s, i) => (
-                  <div className="summary-line" key={s}>
-                    <span>{s}</span>
-                    <div className="editor-actions">
-                      <button
-                        type="button"
-                        disabled={i === 0}
-                        onClick={() => {
-                          const a = [...(v as string[])];
-                          [a[i - 1], a[i]] = [a[i], a[i - 1]];
-                          set(key, a);
-                        }}
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        disabled={i === (v as string[]).length - 1}
-                        onClick={() => {
-                          const a = [...(v as string[])];
-                          [a[i + 1], a[i]] = [a[i], a[i + 1]];
-                          set(key, a);
-                        }}
-                      >
-                        ↓
-                      </button>
+                      <label>
+                        Lisensi
+                        <input
+                          required
+                          value={String(p.license)}
+                          onChange={(e) =>
+                            set(
+                              "prices",
+                              (v as Row[]).map((a, n) =>
+                                n === i ? { ...a, license: e.target.value } : a,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                      <label>
+                        Harga
+                        <input
+                          required
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={Number(p.amount)}
+                          onChange={(e) =>
+                            set(
+                              "prices",
+                              (v as Row[]).map((a, n) =>
+                                n === i
+                                  ? { ...a, amount: Number(e.target.value) }
+                                  : a,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="full">
+                        Ketentuan lisensi
+                        <textarea
+                          required
+                          minLength={10}
+                          value={String(p.terms)}
+                          onChange={(e) =>
+                            set(
+                              "prices",
+                              (v as Row[]).map((a, n) =>
+                                n === i ? { ...a, terms: e.target.value } : a,
+                              ),
+                            )
+                          }
+                        />
+                      </label>
                       <button
                         type="button"
                         onClick={() =>
                           set(
-                            key,
-                            (v as string[]).filter((x) => x !== s),
+                            "prices",
+                            (v as Row[]).filter((_, n) => n !== i),
                           )
                         }
                       >
-                        Hide
+                        Remove license
                       </button>
                     </div>
-                  </div>
-                ))}
-                <div className="editor-actions">
-                  {["portfolio", "about", "shop", "services", "contact"]
-                    .filter((s) => !(v as string[]).includes(s))
-                    .map((s) => (
-                      <button
-                        type="button"
-                        key={s}
-                        onClick={() => set(key, [...(v as string[]), s])}
-                      >
-                        + {s}
-                      </button>
-                    ))}
+                  ))}
+                  <button
+                    type="button"
+                    className="button outline"
+                    onClick={() =>
+                      set("prices", [
+                        ...(v as Row[]),
+                        { license: "Commercial", amount: 0, terms: "" },
+                      ])
+                    }
+                  >
+                    + Add license
+                  </button>
                 </div>
-              </div>
-            );
-          if (["details", "specifications"].includes(key))
-            return (
-              <label className="full" key={key}>
-                {key === "specifications"
-                  ? "Spesifikasi teknis"
-                  : "Detail tambahan"}{" "}
-                — satu Nama: Nilai per baris
-                <textarea
-                  defaultValue={Object.entries(v as Row)
-                    .map(([k, val]) => k + ": " + val)
-                    .join("\n")}
-                  onChange={(e) =>
-                    set(
-                      key,
-                      Object.fromEntries(
+              );
+            if (["media", "socials"].includes(key))
+              return (
+                <label key={key} className="full">
+                  {key === "media"
+                    ? "Gallery — satu URL per baris, video .mp4/.webm dikenali otomatis"
+                    : "Social links — Label | https://alamat"}
+                  <textarea
+                    defaultValue={(v as Row[])
+                      .map((m) =>
+                        key === "media" ? m.url : m.label + " | " + m.url,
+                      )
+                      .join("\n")}
+                    onChange={(e) =>
+                      set(
+                        key,
                         e.target.value
                           .split("\n")
-                          .filter((l) => l.includes(":"))
-                          .map((l) => [
-                            l.slice(0, l.indexOf(":")).trim(),
-                            l.slice(l.indexOf(":") + 1).trim(),
-                          ]),
-                      ),
-                    )
-                  }
-                />
-              </label>
-            );
-          if (key === "fileIds")
-            return (
-              <div className="full" key={key}>
-                <MediaPicker
-                  privateFiles
-                  selected={v as string[]}
-                  onChange={(ids) => set(key, ids)}
-                />
-              </div>
-            );
-          if (
-            [
-              "cover",
-              "heroImage",
-              "heroVideo",
-              "heroModel",
-              "modelUrl",
-            ].includes(key)
-          )
-            return (
-              <div key={key} className="full">
-                <label>
-                  {labelMap[key] || key}
-                  <input
-                    value={String(v || "")}
-                    onChange={(e) => set(key, e.target.value)}
-                    placeholder="https://… atau pilih dari library"
+                          .filter(Boolean)
+                          .map((line) =>
+                            key === "media"
+                              ? {
+                                  url: line.trim(),
+                                  type: /\.(mp4|webm)(\?|$)/i.test(line)
+                                    ? "video"
+                                    : "image",
+                                }
+                              : {
+                                  label: line.split("|")[0].trim(),
+                                  url: line.split("|")[1]?.trim() || "",
+                                },
+                          ),
+                      )
+                    }
                   />
                 </label>
-                <MediaPicker
-                  selected={[String(v || "")]}
-                  onChange={(ids) => set(key, ids[0] || "")}
-                />
-              </div>
-            );
-          if (typeof v === "boolean")
-            return (
-              <label
-                key={key}
-                style={{ flexDirection: "row", alignItems: "center" }}
-              >
-                <input
-                  type="checkbox"
-                  checked={v}
-                  onChange={(e) => set(key, e.target.checked)}
-                />
-                {labelMap[key] || key}
-              </label>
-            );
-          const options =
-            key === "status" && ["messages", "commissions"].includes(module)
-              ? ["NEW", "READ", "IN_PROGRESS", "ARCHIVED"]
-              : selectOptions[key];
-          if (options)
+              );
+            if (key === "sections")
+              return (
+                <div className="full" key={key}>
+                  <label>
+                    Homepage sections — urutkan dengan panah, hapus untuk
+                    menyembunyikan
+                  </label>
+                  {(v as string[]).map((s, i) => (
+                    <div className="summary-line" key={s}>
+                      <span>{s}</span>
+                      <div className="editor-actions">
+                        <button
+                          type="button"
+                          disabled={i === 0}
+                          onClick={() => {
+                            const a = [...(v as string[])];
+                            [a[i - 1], a[i]] = [a[i], a[i - 1]];
+                            set(key, a);
+                          }}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          disabled={i === (v as string[]).length - 1}
+                          onClick={() => {
+                            const a = [...(v as string[])];
+                            [a[i + 1], a[i]] = [a[i], a[i + 1]];
+                            set(key, a);
+                          }}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            set(
+                              key,
+                              (v as string[]).filter((x) => x !== s),
+                            )
+                          }
+                        >
+                          Hide
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  <div className="editor-actions">
+                    {["portfolio", "about", "shop", "services", "contact"]
+                      .filter((s) => !(v as string[]).includes(s))
+                      .map((s) => (
+                        <button
+                          type="button"
+                          key={s}
+                          onClick={() => set(key, [...(v as string[]), s])}
+                        >
+                          + {s}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              );
+            if (["details", "specifications"].includes(key))
+              return (
+                <label className="full" key={key}>
+                  {key === "specifications"
+                    ? "Spesifikasi teknis"
+                    : "Detail tambahan"}{" "}
+                  — satu Nama: Nilai per baris
+                  <textarea
+                    defaultValue={Object.entries(v as Row)
+                      .map(([k, val]) => k + ": " + val)
+                      .join("\n")}
+                    onChange={(e) =>
+                      set(
+                        key,
+                        Object.fromEntries(
+                          e.target.value
+                            .split("\n")
+                            .filter((l) => l.includes(":"))
+                            .map((l) => [
+                              l.slice(0, l.indexOf(":")).trim(),
+                              l.slice(l.indexOf(":") + 1).trim(),
+                            ]),
+                        ),
+                      )
+                    }
+                  />
+                </label>
+              );
+            if (key === "fileIds")
+              return (
+                <div className="full" key={key}>
+                  <MediaPicker
+                    privateFiles
+                    selected={v as string[]}
+                    onChange={(ids) => set(key, ids)}
+                  />
+                </div>
+              );
+            if (simple && key === "cover")
+              return (
+                <div key={key} className="full">
+                  <MediaPicker
+                    selected={[String(v || "")]}
+                    onChange={(ids) => set(key, ids[0] || "")}
+                  />
+                  <details style={{ marginTop: 10 }}>
+                    <summary>Atau tempel URL gambar manual</summary>
+                    <input
+                      value={String(v || "")}
+                      onChange={(e) => set(key, e.target.value)}
+                      placeholder="https://…"
+                    />
+                  </details>
+                </div>
+              );
+            if (simple && key === "category")
+              return (
+                <label key={key}>
+                  Kategori
+                  <input
+                    required
+                    list="category-options"
+                    value={String(v || "")}
+                    onChange={(e) => set(key, e.target.value)}
+                    placeholder="Pilih yang ada atau ketik baru"
+                  />
+                  <datalist id="category-options">
+                    {categories.map((c) => (
+                      <option key={c} value={c} />
+                    ))}
+                  </datalist>
+                </label>
+              );
+            if (
+              [
+                "cover",
+                "heroImage",
+                "heroVideo",
+                "heroModel",
+                "modelUrl",
+              ].includes(key)
+            )
+              return (
+                <div key={key} className="full">
+                  <label>
+                    {labelMap[key] || key}
+                    <input
+                      value={String(v || "")}
+                      onChange={(e) => set(key, e.target.value)}
+                      placeholder="https://… atau pilih dari library"
+                    />
+                  </label>
+                  <MediaPicker
+                    selected={[String(v || "")]}
+                    onChange={(ids) => set(key, ids[0] || "")}
+                  />
+                </div>
+              );
+            if (typeof v === "boolean")
+              return (
+                <label
+                  key={key}
+                  style={{ flexDirection: "row", alignItems: "center" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={v}
+                    onChange={(e) => set(key, e.target.checked)}
+                  />
+                  {labelMap[key] || key}
+                </label>
+              );
+            const options =
+              key === "status" && ["messages", "commissions"].includes(module)
+                ? ["NEW", "READ", "IN_PROGRESS", "ARCHIVED"]
+                : selectOptions[key];
+            if (options)
+              return (
+                <label key={key}>
+                  {labelMap[key] || key}
+                  <select
+                    value={String(v)}
+                    onChange={(e) => set(key, e.target.value)}
+                  >
+                    {options.map((o) => (
+                      <option key={o}>{o}</option>
+                    ))}
+                  </select>
+                </label>
+              );
+            if (["description", "intro", "about", "notes"].includes(key))
+              return (
+                <label className="full" key={key}>
+                  {labelMap[key]}
+                  {key === "description" && (
+                    <small>
+                      Bisa pakai: # Judul · **tebal** · *miring* · - daftar
+                    </small>
+                  )}
+                  <textarea
+                    value={String(v)}
+                    onChange={(e) => set(key, e.target.value)}
+                    style={{ minHeight: key === "description" ? 160 : 120 }}
+                  />
+                </label>
+              );
+            if (Array.isArray(v))
+              return (
+                <label key={key} className="full">
+                  {labelMap[key] || key}
+                  <input
+                    value={v.join(", ")}
+                    onChange={(e) =>
+                      set(
+                        key,
+                        e.target.value
+                          .split(",")
+                          .map((s) => s.trim())
+                          .filter(Boolean),
+                      )
+                    }
+                  />
+                </label>
+              );
             return (
               <label key={key}>
                 {labelMap[key] || key}
-                <select
-                  value={String(v)}
-                  onChange={(e) => set(key, e.target.value)}
-                >
-                  {options.map((o) => (
-                    <option key={o}>{o}</option>
-                  ))}
-                </select>
-              </label>
-            );
-          if (["description", "intro", "about", "notes"].includes(key))
-            return (
-              <label className="full" key={key}>
-                {labelMap[key]}
-                {key === "description" && (
+                {simple && key === "title" && (
                   <small>
-                    Rich text: # Judul · **tebal** · *miring* · - daftar ·
-                    [teks](https://…) · fenced code blocks
+                    Link otomatis: /{String(data.slug || "…")} (bisa diubah di
+                    Opsi lanjutan)
                   </small>
                 )}
-                <textarea
-                  value={String(v)}
-                  onChange={(e) => set(key, e.target.value)}
-                  style={{ minHeight: key === "description" ? 240 : 120 }}
-                />
-              </label>
-            );
-          if (Array.isArray(v))
-            return (
-              <label key={key} className="full">
-                {labelMap[key] || key}
                 <input
-                  value={v.join(", ")}
+                  type={
+                    key === "accent"
+                      ? "color"
+                      : key === "expiresAt"
+                        ? "date"
+                        : typeof v === "number" || key === "maxUses"
+                          ? "number"
+                          : "text"
+                  }
+                  value={
+                    key === "expiresAt"
+                      ? String(v || "").slice(0, 10)
+                      : String(v ?? "")
+                  }
                   onChange={(e) =>
                     set(
                       key,
-                      e.target.value
-                        .split(",")
-                        .map((s) => s.trim())
-                        .filter(Boolean),
+                      typeof v === "number"
+                        ? Number(e.target.value)
+                        : key === "maxUses"
+                          ? e.target.value
+                            ? Number(e.target.value)
+                            : null
+                          : key === "expiresAt"
+                            ? e.target.value || null
+                            : e.target.value,
                     )
                   }
                 />
               </label>
             );
+          };
+          const entries = Object.entries(data);
+          const isAdv = ([k]: [string, unknown]) =>
+            simple && ADVANCED_KEYS.includes(k);
           return (
-            <label key={key}>
-              {labelMap[key] || key}
-              <input
-                type={
-                  key === "accent"
-                    ? "color"
-                    : key === "expiresAt"
-                      ? "date"
-                      : typeof v === "number" || key === "maxUses"
-                        ? "number"
-                        : "text"
-                }
-                value={
-                  key === "expiresAt"
-                    ? String(v || "").slice(0, 10)
-                    : String(v ?? "")
-                }
-                onChange={(e) =>
-                  set(
-                    key,
-                    typeof v === "number"
-                      ? Number(e.target.value)
-                      : key === "maxUses"
-                        ? e.target.value
-                          ? Number(e.target.value)
-                          : null
-                        : key === "expiresAt"
-                          ? e.target.value || null
-                          : e.target.value,
-                  )
-                }
-              />
-            </label>
+            <>
+              {entries.filter((e) => !isAdv(e)).map(renderField)}
+              {entries.some(isAdv) && (
+                <details className="full panel">
+                  <summary>
+                    Opsi lanjutan (link, SKU, tags, galeri, featured…)
+                  </summary>
+                  <div className="form-grid" style={{ marginTop: 15 }}>
+                    {entries.filter(isAdv).map(renderField)}
+                  </div>
+                </details>
+              )}
+            </>
           );
-        })}
+        })()}
       </div>
       <div className="actions">
         <button className="button" disabled={busy}>
