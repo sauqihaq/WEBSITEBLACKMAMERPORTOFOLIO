@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { ContactLinks } from "./contact-links";
+import { CoverMedia } from "./cover-media";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
@@ -249,10 +250,9 @@ export function WorkCard({
         className="work-image"
         href={(shop ? "/shop/" : "/portfolio/") + work.slug}
       >
-        <img
+        <CoverMedia
           src={work.cover}
           alt={work.title + " — " + work.category}
-          loading="lazy"
         />
         <span className="work-category">{work.category}</span>
         <span className="image-arrow">
@@ -472,7 +472,7 @@ export function Cart() {
       <div>
         {items.map((i) => (
           <div className="cart-row" key={i.productId + i.license}>
-            <img src={i.cover} alt={i.title} />
+            <CoverMedia src={i.cover} alt={i.title} />
             <div>
               <h3>{i.title}</h3>
               <small>{i.license} license</small>
