@@ -11,7 +11,7 @@ import {
   limit,
   sameOrigin,
 } from "@/lib/security";
-import { queueMail, flushMail } from "@/lib/mail";
+import { queueMail, flushMail, mailConfigured } from "@/lib/mail";
 const digest = (s: string) => createHash("sha256").update(s).digest("hex");
 export async function POST(
   req: Request,
@@ -23,7 +23,7 @@ export async function POST(
     const body = await json(req);
     await limit("account:" + ip(req), 20);
     if (action === "register") {
-      if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM)
+      if (!mailConfigured())
         throw new HttpError(
           503,
           "Registrasi belum diaktifkan: layanan email belum dikonfigurasi.",
@@ -173,7 +173,7 @@ export async function POST(
   }
 }
 async function sendToken(email: string, type: string) {
-  if (!process.env.RESEND_API_KEY || !process.env.EMAIL_FROM)
+  if (!mailConfigured())
     throw new HttpError(503, "Layanan email belum dikonfigurasi.");
   const token = randomBytes(32).toString("hex");
   await db.token.create({
