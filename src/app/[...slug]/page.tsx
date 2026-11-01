@@ -2,6 +2,7 @@ import { ContactLinks } from "@/components/contact-links";
 import Link from "next/link";
 import { money } from "@/lib/format";
 import { RichText } from "@/components/rich-text";
+import { CoverMedia } from "@/components/cover-media";
 import { notFound, redirect } from "next/navigation";
 import type { Metadata } from "next";
 import { Suspense } from "react";
@@ -153,7 +154,12 @@ export default async function Page({ params, searchParams }: Props) {
           ← BACK TO {shop ? "SHOP" : "PORTFOLIO"}
         </Link>
         <Heading tag={item.category} title={item.title} />
-        <img className="detail-hero" src={item.cover} alt={item.title} />
+        <CoverMedia
+          className="detail-hero"
+          src={item.cover}
+          alt={item.title}
+          lazy={false}
+        />
         <div className="detail-main">
           <div>
             <h2>
@@ -423,7 +429,12 @@ export default async function Page({ params, searchParams }: Props) {
         <article className="page">
           <Heading tag="STUDIO JOURNAL" title={post.title} />
           {post.cover && (
-            <img className="detail-hero" src={post.cover} alt={post.title} />
+            <CoverMedia
+              className="detail-hero"
+              src={post.cover}
+              alt={post.title}
+              lazy={false}
+            />
           )}
           <p className="tiny muted" style={{ margin: "25px 0" }}>
             BLACKMAMERSTUDIO · {post.createdAt.toLocaleDateString("id-ID")} ·{" "}
@@ -445,7 +456,7 @@ export default async function Page({ params, searchParams }: Props) {
           <div className="work-grid">
             {posts.map((p) => (
               <Link key={p.id} href={"/blog/" + p.slug} className="panel">
-                {p.cover && <img src={p.cover} alt={p.title} />}
+                {p.cover && <CoverMedia src={p.cover} alt={p.title} />}
                 <h2 style={{ margin: "20px 0" }}>{p.title}</h2>
                 <p>{p.description.slice(0, 150)}…</p>
               </Link>
